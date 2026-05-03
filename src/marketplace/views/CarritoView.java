@@ -1,5 +1,10 @@
 package marketplace.views;
 
+import javafx.concurrent.Task;
+import javafx.scene.control.Dialog;
+import javafx.scene.control.ProgressBar;
+import javafx.scene.layout.VBox;
+
 import marketplace.controllers.CarritoController;
 import marketplace.models.ItemCarrito;
 import marketplace.models.Producto;
@@ -56,68 +61,70 @@ public class CarritoView {
             
             Label totalMonto = new Label(String.format("$%.2f", carritoController.getTotal()));
             totalMonto.setStyle("-fx-font-size: 28px; -fx-font-weight: bold; -fx-text-fill: #667eea;");
+
+Button comprarBtn = new Button("Finalizar Compra");
+comprarBtn.setStyle("-fx-background-color: #48bb78; -fx-text-fill: white; -fx-padding: 12 30; -fx-background-radius: 30;");
+comprarBtn.setOnAction(e -> {
+    // Confirmación de compra (igual que antes)
+    Alert confirmAlert = new Alert(Alert.AlertType.CONFIRMATION);
+    confirmAlert.setContentText("Total: $" + String.format("%.2f", carritoController.getTotal()) + "\n¿Confirmar compra?");
+    confirmAlert.showAndWait().ifPresent(response -> {
+        if (response == ButtonType.OK) {
+            // Obtener el Task de compra desde el controlador
+            Task<Void> tareaCompra = carritoController.finalizarCompraAsync();
             
-            Button comprarBtn = new Button("Finalizar Compra");
-            comprarBtn.setStyle("-fx-background-color: #48bb78; -fx-text-fill: white; -fx-padding: 12 30; -fx-background-radius: 30;");
-            comprarBtn.setOnAction(e -> {
-                Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
-                alert.setContentText("Total: $" + String.format("%.2f", carritoController.getTotal()) + "\n¿Confirmar compra?");
-                alert.showAndWait().ifPresent(response -> {
-                    if (response == ButtonType.OK) {
-                        carritoController.vaciarCarrito();
-                        Alert success = new Alert(Alert.AlertType.INFORMATION);
-                        success.setContentText("¡Compra realizada!");
-                        success.show();
-                        catalogoView.start(stage, carritoController.getCarrito().getUsuario());
-                    }
-                });
+            // Crear diálogo de progreso
+            Dialog<Void> dialog = new Dialog<>();
+            dialog.setTitle("Procesando compra");
+            dialog.setHeaderText("Por favor espere, estamos procesando su pedido");
+            
+            ProgressBar progressBar = new ProgressBar();
+            progressBar.setPrefWidth(300);
+            progressBar.progressProperty().bind(tareaCompra.progressProperty());
+            
+            Label lblEstado = new Label();
+            lblEstado.textProperty().bind(tareaCompra.messageProperty());
+            
+            VBox vbox = new VBox(10, lblEstado, progressBar);
+            dialog.getDialogPane().setContent(vbox);
+            dialog.getDialogPane().getButtonTypes().add(ButtonType.CANCEL);
+            
+            // Cancelar
+            Button btnCancel = (Button) dialog.getDialogPane().lookupButton(ButtonType.CANCEL);
+            btnCancel.setOnAction(ev -> {
+                tareaCompra.cancel();
+                dialog.close();
+                Alert cancelAlert = new Alert(Alert.AlertType.INFORMATION, "Compra cancelada.");
+                cancelAlert.show();
             });
             
-            Region spacer2 = new Region();
-            HBox.setHgrow(spacer2, Priority.ALWAYS);
+            // Al terminar correctamente
+            tareaCompra.setOnSucceeded(event -> {
+                dialog.close();
+                Alert successAlert = new Alert(Alert.AlertType.INFORMATION, "¡Compra realizada con éxito!");
+                successAlert.show();
+                // Regresar al catálogo
+                catalogoView.start(stage, carritoController.getCarrito().getUsuario());
+            });
             
-            totalBox.getChildren().addAll(totalLabel, totalMonto, spacer2, comprarBtn);
-            content.getChildren().addAll(itemsBox, totalBox);
+            // Si falla
+            tareaCompra.setOnFailed(event -> {
+                dialog.close();
+                Alert errorAlert = new Alert(Alert.AlertType.ERROR, "Ocurrió un error durante la compra.");
+                errorAlert.show();
+            });
+            
+            // Iniciar hilo
+            Thread hilo = new Thread(tareaCompra);
+            hilo.setDaemon(true);
+            hilo.start();
+            dialog.show();
         }
-        
-        root.setTop(header);
-        root.setCenter(new ScrollPane(content));
-        
-        Scene scene = new Scene(root, 1100, 700);
-        stage.setTitle("MarketPlace FX - Carrito");
-        stage.setScene(scene);
-        stage.show();
-    }
-    
-    private HBox crearItemCarrito(ItemCarrito item, CarritoController controller, Stage stage, CatalogoView catalogoView) {
-        HBox itemBox = new HBox(20);
-        itemBox.setAlignment(Pos.CENTER_LEFT);
-        itemBox.setPadding(new Insets(15));
-        itemBox.setStyle("-fx-background-color: white; -fx-background-radius: 12;");
-        
-        Producto p = item.getProducto();
-        
-        VBox infoBox = new VBox(5);
-        Label nombreLabel = new Label(p.getNombre());
-        nombreLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: bold;");
-        Label precioLabel = new Label(p.getPrecioFormateado() + " c/u");
-        infoBox.getChildren().addAll(nombreLabel, precioLabel);
-        
-        Label subtotalLabel = new Label(String.format("$%.2f", item.getSubtotal()));
-        subtotalLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #667eea;");
-        
-        Button eliminarBtn = new Button("Eliminar");
-        eliminarBtn.setStyle("-fx-background-color: #e53e3e; -fx-text-fill: white;");
-        eliminarBtn.setOnAction(e -> {
-            controller.eliminarProducto(p);
-            CarritoView carritoView = new CarritoView();
-            carritoView.start(stage, controller, catalogoView);
-        });
-        
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
-        
-        itemBox.getChildren().addAll(infoBox, spacer, subtotalLabel, eliminarBtn);
-        return itemBox;
-    }
-}
+    });
+});
+
+Region spacer2 = new Region();
+HBox.setHgrow(spacer2, Priority.ALWAYS);
+
+totalBox.getChildren().addAll(totalLabel, totalMonto, spacer2, comprarBtn);
+           
